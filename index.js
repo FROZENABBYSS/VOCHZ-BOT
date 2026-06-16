@@ -22,19 +22,17 @@ const Database = require("better-sqlite3");
 const db = new Database("./vouches.db");
 
 
-// ================= DB =================
-db.serialize(() => {
-    db.run(`
-        CREATE TABLE IF NOT EXISTS vouches (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            giverId TEXT,
-            receiverId TEXT,
-            reason TEXT,
-            messageId TEXT UNIQUE,
-            timestamp INTEGER
-        )
-    `);
-});
+// ================= DB (FIXED FOR better-sqlite3) =================
+db.exec(`
+    CREATE TABLE IF NOT EXISTS vouches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        giverId TEXT,
+        receiverId TEXT,
+        reason TEXT,
+        messageId TEXT UNIQUE,
+        timestamp INTEGER
+    )
+`);
 
 // ================= CLIENT =================
 const client = new Client({
@@ -125,49 +123,50 @@ client.on('messageCreate', async (message) => {
             service = 'No service specified.';
         }
 
-        db.run(
+        db.prepare(
             `INSERT OR IGNORE INTO vouches (giverId, receiverId, reason, messageId, timestamp)
-             VALUES (?, ?, ?, ?, ?)`,
-            [message.author.id, user.id, service, message.id, Date.now()]
+             VALUES (?, ?, ?, ?, ?)`
+        ).run(
+            message.author.id,
+            user.id,
+            service,
+            message.id,
+            Date.now()
         );
 
-        db.get(
-            `SELECT COUNT(*) as total FROM vouches WHERE receiverId = ?`,
-            [user.id],
-            (err, row) => {
+        const row = db.prepare(
+            `SELECT COUNT(*) as total FROM vouches WHERE receiverId = ?`
+        ).get(user.id);
 
-                if (!isVouchChannel) return;
+        if (!isVouchChannel) return;
 
-                const now = new Date();
-                const time = now.toLocaleTimeString();
+        const now = new Date();
+        const time = now.toLocaleTimeString();
 
-                const embed = new EmbedBuilder()
-                    .setColor('#ff0000')
-                    .setTitle('⭐ POSITIVE VOUCH')
-                    .setDescription(`${message.author} vouched for <@${user.id}>`)
-                    .addFields(
-                        {
-                            name: '📊 Total Vouches',
-                            value: `${row?.total || 0}`,
-                            inline: false
-                        },
-                        {
-                            name: '📝 Service',
-                            value: service.slice(0, 1024),
-                            inline: false
-                        }
-                    )
-                    .setFooter({
-                        text: `RSL Services 💠 Quality Over Quantity 💠 Today ${time}`
-                    })
+        const embed = new EmbedBuilder()
+            .setColor('#ff0000')
+            .setTitle('⭐ POSITIVE VOUCH')
+            .setDescription(`${message.author} vouched for <@${user.id}>`)
+            .addFields(
+                {
+                    name: '📊 Total Vouches',
+                    value: `${row?.total || 0}`,
+                    inline: false
+                },
+                {
+                    name: '📝 Service',
+                    value: service.slice(0, 1024),
+                    inline: false
+                }
+            )
+            .setFooter({
+                text: `RSL Services 💠 Quality Over Quantity 💠 Today ${time}`
+            });
 
-                message.channel.send({
-                    embeds: [embed]
-                });
-            }
-        );
+        message.channel.send({ embeds: [embed] });
     }
 });
+
 // ================= INTERACTIONS =================
 client.on('interactionCreate', async interaction => {
 
@@ -180,25 +179,22 @@ client.on('interactionCreate', async interaction => {
 
         const user = interaction.options.getUser('user') || interaction.user;
 
-        db.get(
-            `SELECT COUNT(*) as total FROM vouches WHERE receiverId = ?`,
-            [user.id],
-            (err, row) => {
+        const row = db.prepare(
+            `SELECT COUNT(*) as total FROM vouches WHERE receiverId = ?`
+        ).get(user.id);
 
-                const embed = new EmbedBuilder()
-                    .setColor('#ff0000')
-                    .setTitle(`⭐ ${user.tag}`)
-                    .setDescription(`Total Vouches: **${row.total}**`)
-                    .setThumbnail(user.displayAvatarURL())
-                    .setFooter({
-    text: `RSL Services 💠 Quality Over Quantity 💠 Today ${time}`
-});
-                    
-                    
+        const time = new Date().toLocaleTimeString();
 
-                interaction.editReply({ embeds: [embed] });
-            }
-        );
+        const embed = new EmbedBuilder()
+            .setColor('#ff0000')
+            .setTitle(`⭐ ${user.tag}`)
+            .setDescription(`Total Vouches: **${row.total}**`)
+            .setThumbnail(user.displayAvatarURL())
+            .setFooter({
+                text: `RSL Services 💠 Quality Over Quantity 💠 Today ${time}`
+            });
+
+        interaction.editReply({ embeds: [embed] });
     }
 
     // ================= LEADERBOARD =================
@@ -206,37 +202,33 @@ client.on('interactionCreate', async interaction => {
 
         await interaction.deferReply();
 
-        db.all(
-            `
+        const rows = db.prepare(`
             SELECT receiverId, COUNT(*) as total
             FROM vouches
             GROUP BY receiverId
             ORDER BY total DESC
             LIMIT 10
-            `,
-            async (err, rows) => {
+        `).all();
 
-                let desc = '';
+        let desc = '';
 
-                for (let i = 0; i < rows.length; i++) {
-                    const user = await client.users.fetch(rows[i].receiverId).catch(() => null);
+        for (let i = 0; i < rows.length; i++) {
+            const user = await client.users.fetch(rows[i].receiverId).catch(() => null);
 
-                    desc += `**#${i + 1}** ┃ ${user ? user.tag : 'Unknown'}\n` +
-                            `⭐ Vouches: **${rows[i].total}**\n\n`;
-                }
+            desc += `**#${i + 1}** ┃ ${user ? user.tag : 'Unknown'}\n` +
+                    `⭐ Vouches: **${rows[i].total}**\n\n`;
+        }
 
-                const embed = new EmbedBuilder()
-                    .setColor('#ff0000')
-                    .setTitle('🏆 VOUCH LEADERBOARD')
-                    .setDescription(desc || 'No vouches yet')
-                    .setFooter({
-                        text: `RSL Services 💠 Quality Over Quantity 💠`
-                    })
-                    .setTimestamp();
+        const embed = new EmbedBuilder()
+            .setColor('#ff0000')
+            .setTitle('🏆 VOUCH LEADERBOARD')
+            .setDescription(desc || 'No vouches yet')
+            .setFooter({
+                text: `RSL Services 💠 Quality Over Quantity 💠`
+            })
+            .setTimestamp();
 
-                interaction.editReply({ embeds: [embed] });
-            }
-        );
+        interaction.editReply({ embeds: [embed] });
     }
 
     // ================= COUNTALL =================
@@ -267,16 +259,15 @@ client.on('interactionCreate', async interaction => {
 
                     if (user.bot) continue;
 
-                    db.run(
+                    db.prepare(
                         `INSERT OR IGNORE INTO vouches (giverId, receiverId, reason, messageId, timestamp)
-                         VALUES (?, ?, ?, ?, ?)`,
-                        [
-                            msg.author.id,
-                            user.id,
-                            msg.content || 'Imported vouch',
-                            msg.id,
-                            msg.createdTimestamp
-                        ]
+                         VALUES (?, ?, ?, ?, ?)`
+                    ).run(
+                        msg.author.id,
+                        user.id,
+                        msg.content || 'Imported vouch',
+                        msg.id,
+                        msg.createdTimestamp
                     );
 
                     processed++;
@@ -292,7 +283,7 @@ client.on('interactionCreate', async interaction => {
 
 // ================= DELETE TRACKING =================
 client.on('messageDelete', (message) => {
-    db.run(`DELETE FROM vouches WHERE messageId = ?`, [message.id]);
+    db.prepare(`DELETE FROM vouches WHERE messageId = ?`).run(message.id);
 });
 
 // ================= LOGIN =================
