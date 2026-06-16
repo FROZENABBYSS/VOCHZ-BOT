@@ -22,14 +22,6 @@ const Database = require("better-sqlite3");
 const db = new Database("./vouches.db");
 
 
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ]
-});
-
 // ================= DB =================
 db.serialize(() => {
     db.run(`
